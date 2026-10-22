@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chancellor 6502 — Inventory</title>
+  <style>
+    :root { --bg:#0f1216; --card:#1c222b; --line:#2a323e; --text:#e8edf4; --muted:#8b97a8; --accent:#3dd68c; --warn:#f5b942; --danger:#ef6b6b; --blue:#6aa8ff; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    .app { max-width:1280px; margin:0 auto; padding:24px 18px 80px; }
+    header { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:22px; }
+    .brand h1 { font-size:1.3rem; }
+    .brand p { color:var(--muted); font-size:.88rem; }
+    .header-actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .btn { border:1px solid var(--line); background:var(--card); color:var(--text); padding:9px 14px; border-radius:10px; cursor:pointer; }
+    .btn.primary { background:var(--accent); color:#062015; border-color:transparent; font-weight:600; }
+    .btn.scan { color:var(--blue); }
+    .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+    .stat { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+    .stat .label { color:var(--muted); font-size:.75rem; text-transform:uppercase; }
+    .stat .value { font-size:1.4rem; font-weight:700; }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    .search, select.filter { background:#171b21; border:1px solid var(--line); color:var(--text); border-radius:10px; padding:10px 12px; }
+    .search { flex:1; min-width:200px; }
+    .table-wrap { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; min-width:800px; }
+    th, td { text-align:left; padding:11px 12px; font-size:.92rem; }
+    th { color:var(--muted); font-size:.72rem; text-transform:uppercase; background:#161b22; cursor:pointer; }
+    tbody tr { border-top:1px solid var(--line); cursor:pointer; }
+    tbody tr:hover { background:#212833; }
+    .sku { font-family:ui-monospace,monospace; font-size:.8rem; color:var(--muted); }
+    .badge { display:inline-flex; font-size:.75rem; font-weight:600; padding:3px 8px; border-radius:999px; white-space:nowrap; }
+    .ok { background:#1e3d2e; color:var(--accent); }
+    .buy { background:#3d3318; color:var(--warn); }
+    .out { background:#3a1e22; color:var(--danger); }
+    .make { background:#1d2b3f; color:#7eb3ff; }
+    .order { background:#2a2433; color:#cbb6ff; }
+    .white { background:#2a3038; color:#f3f6fb; }
+    .orange { background:#3d2a14; color:#ffb060; }
+    .both { background:#24332b; color:#9ee0b8; }
+    .icon-btn { background:transparent; border:1px solid var(--line); color:var(--muted); border-radius:8px; padding:4px 8px; cursor:pointer; }
+    .note { margin-top:14px; color:var(--muted); font-size:.8rem; }
+    .modal-bg { position:fixed; inset:0; background:rgba(6,8,12,.72); display:none; align-items:center; justify-content:center; padding:20px; z-index:80; }
+    .modal-bg.open { display:flex !important; }
+    .modal { width:min(560px,100%); background:#171b21; border:1px solid var(--line); border-radius:16px; padding:20px; }
+    .modal.wide { width:min(640px,100%); }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .field { display:flex; flex-direction:column; gap:5px; }
+    .full { grid-column:1/-1; }
+    label { font-size:.78rem; color:var(--muted); font-weight:600; }
+    input, textarea, select { background:#12161c; border:1px solid var(--line); color:var(--text); border-radius:9px; padding:9px 10px; }
+    .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; flex-wrap:wrap; }
+    .sku-row { display:flex; gap:8px; } .sku-row input { flex:1; }
+    .viewer { background:#000; border-radius:12px; min-height:220px; position:relative; overflow:hidden; }
+    .viewer video { width:100%; max-height:360px; object-fit:cover; display:block; }
+    .scan-error { display:none; margin-top:10px; padding:10px; border-radius:10px; background:#3a1e22; color:#ffc4c4; font-size:.88rem; }
+    .scan-error.show { display:block; }
+    .chip { border:1px solid var(--line); background:#12161c; color:var(--muted); padding:7px 12px; border-radius:999px; cursor:pointer; }
+    .chip.on { border-color:var(--accent); color:var(--accent); }
+    .toast-wrap { position:fixed; right:16px; bottom:16px; z-index:40; display:flex; flex-direction:column; gap:8px; }
+    .toast { background:#1c2620; border:1px solid #2e4a3a; padding:10px 14px; border-radius:10px; }
+    @media (max-width:640px) { .grid { grid-template-columns:1fr; } .stats { grid-template-columns:1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">
+        <h1>Chancellor 6502</h1>
+        <p>JR4 / Dad and Pam inventory — sort ordered parts vs made by us</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn scan" id="shareBtn">Share / sync</button>
+        <button class="btn scan" id="scanBtn">Scan barcode</button>
+        <button class="btn" id="importBtn">Import CSV</button>
+        <button class="btn" id="exportBtn">Export CSV</button>
+        <button class="btn" id="exportExcelBtn">Export Excel</button>
+        <button class="btn" id="seedBtn">Reload list</button>
+        <button class="btn primary" id="addBtn">+ Add item</button>
+      </div>
+    </header>
+    <section class="stats">
+      <div class="stat"><div class="label">SKUs</div><div class="value" id="statSkus">0</div></div>
+      <div class="stat"><div class="label">Units on hand</div><div class="value" id="statUnits">0</div></div>
+      <div class="stat"><div class="label">Need action</div><div class="value" id="statLow">0</div></div>
+      <div class="stat"><div class="label">Pam white / orange</div><div class="value" id="statColors">0 / 0</div></div>
+    </section>
+    <div class="toolbar">
+      <input class="search" id="search" placeholder="Search name, SKU, location…" />
+      <select class="filter" id="statusFilter">
+        <option value="all">All statuses</option>
+        <option value="ok">In stock</option>
+        <option value="buy">Re-purchase needed</option>
+        <option value="make">Production needed</option>
+        <option value="out">Out of stock</option>
+      </select>
+      <select class="filter" id="catFilter"><option value="all">All categories</option></select>
+      <select class="filter" id="sourceFilter">
+        <option value="all">Ordered + made by us</option>
+        <option value="order">Ordered parts only</option>
+        <option value="make">Made by us only</option>
+      </select>
+      <select class="filter" id="colorFilter">
+        <option value="all">All colors</option>
+        <option value="white">White</option>
+        <option value="orange">Orange</option>
+        <option value="both">Both colors</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort="name">Item</th>
+            <th data-sort="sku">SKU / barcode</th>
+            <th data-sort="category">Category</th>
+            <th data-sort="source">Ordered / made</th>
+            <th data-sort="color">Color</th>
+            <th data-sort="qty">Qty</th>
+            <th data-sort="status">Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <p class="note" id="syncNote">This copy is saved on this device only until you click Share / sync.</p>
+  </div>
+
+  <div class="modal-bg" id="modalBg">
+    <form class="modal" id="form">
+      <h2 id="modalTitle">Add item</h2>
+      <div class="grid">
+        <div class="field full"><label>Name</label><input id="name" required /></div>
+        <div class="field full"><label>SKU / barcode</label><div class="sku-row"><input id="sku" required /><button type="button" class="btn scan" id="formScanBtn">Scan</button></div></div>
+        <div class="field"><label>Category</label><input id="category" list="catList" /><datalist id="catList"></datalist></div>
+        <div class="field" id="qtyField"><label>Quantity</label><input id="qty" type="number" min="0" value="0" /></div>
+        <div class="field" id="qtyWhiteField"><label>White qty</label><input id="qtyWhite" type="number" min="0" value="0" /></div>
+        <div class="field" id="qtyOrangeField"><label>Orange qty</label><input id="qtyOrange" type="number" min="0" value="0" /></div>
+        <div class="field"><label>Reorder point</label><input id="reorder" type="number" min="0" value="5" /></div>
+        <div class="field"><label>Status</label>
+          <select id="itemStatus">
+            <option value="ok">In stock</option>
+            <option value="buy">Re-purchase needed</option>
+            <option value="make">Production needed</option>
+            <option value="out">Out of stock</option>
+          </select>
+        </div>
+        <div class="field"><label>How we get it</label>
+          <select id="itemSource">
+            <option value="order">Ordered</option>
+            <option value="make">Made by us</option>
+          </select>
+        </div>
+        <div class="field"><label>Color (Pam)</label>
+          <select id="itemColor">
+            <option value="n/a">Not color-specific</option>
+            <option value="white">White</option>
+            <option value="orange">Orange</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+        <div class="field"><label>Location</label><input id="location" /></div>
+        <div class="field full"><label>Notes</label><textarea id="notes"></textarea></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="dupBtn">Duplicate</button>
+        <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        <button type="submit" class="btn primary">Save item</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal-bg" id="shareBg">
+    <div class="modal">
+      <h2>Share this inventory</h2>
+      <p class="note">Create a live room, then send the code to phones or other computers. Anyone with the code can view and edit. Anyone who can guess the code can edit, so treat it like a shop password.</p>
+      <div class="field" style="margin-top:12px">
+        <label>Share code</label>
+        <div class="sku-row">
+          <input id="shareCode" placeholder="Paste a code to join" />
+          <button type="button" class="btn" id="copyShareBtn">Copy</button>
+        </div>
+      </div>
+      <p class="note" id="shareStatus">Not connected.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="leaveShareBtn">Disconnect</button>
+        <button type="button" class="btn" id="joinShareBtn">Join</button>
+        <button type="button" class="btn primary" id="createShareBtn">Create room</button>
+        <button type="button" class="btn" id="closeShareBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="scanBg">
+    <div class="modal wide">
+      <h2>Scan barcode</h2>
+      <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap;">
+        <button type="button" class="chip on" data-mode="receive">Receive +1</button>
+        <button type="button" class="chip" data-mode="lookup">Lookup / edit</button>
+        <button type="button" class="chip" data-mode="add">New item</button>
+      </div>
+      <div class="viewer"><video id="scanVideo" playsinline muted autoplay></video></div>
+      <div class="scan-error" id="scanError"></div>
+      <div class="field" style="margin-top:10px;"><label>Or enter code</label>
+        <div class="sku-row"><input id="manualCode" /><button type="button" class="btn primary" id="manualGo">Go</button></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="photoBtn">Scan photo</button>
+        <button type="button" class="btn" id="closeScanBtn">Close</button>
+      </div>
+      <input type="file" id="photoInput" accept="image/*" capture="environment" hidden />
+    </div>
+  </div>
+
+  <div class="modal-bg" id="hitBg">
+    <div class="modal">
+      <h2>Item found</h2>
+      <p><strong id="hitName"></strong></p>
+      <p class="sku" id="hitSku"></p>
+      <p id="hitMeta" class="note"></p>
+      <div class="field" id="hitColorField">
+        <label>Color to count</label>
+        <select id="hitColor">
+          <option value="white">White</option>
+          <option value="orange">Orange</option>
+        </select>
+      </div>
+      <div class="sku-row"><button type="button" class="btn" id="qtyMinus">−</button><input id="hitDelta" type="number" value="1" /><button type="button" class="btn" id="qtyPlus">+</button></div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="hitEdit">Edit</button>
+        <button type="button" class="btn" id="hitOut">Remove qty</button>
+        <button type="button" class="btn primary" id="hitIn">Receive qty</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast-wrap" id="toasts"></div>
+  <input type="file" id="fileInput" accept=".csv,text/csv" hidden />
+  <script>
+const KEY = "stockroom.chancellor6502.v3";
+const SHARE_KEY = "stockroom.chancellor6502.share";
+const MQTT_URLS = [
+  "wss://broker.emqx.io:8084/mqtt",
+  "wss://broker.hivemq.com:8884/mqtt"
+];
+let shareId = localStorage.getItem(SHARE_KEY) || "";
+let lastRemoteAt = 0;
+let mqttClient = null;
+let applyingRemote = false;
+let items = [], sortKey = "source", sortDir = 1, editingId = null, scanMode = "receive";
+let mediaStream = null, scanLoopOn = false, barcodeDetector = null;
+let lastScan = { code: "", at: 0 }, pendingHit = null, highlightId = null, formWantsScan = false;
+const $ = (id) => document.getElementById(id);
+
+const catalog = [
+  ["","Iota 24V","JR4/Dad",6,"buy",""],["DLS 15","Iota 12V","JR4/Dad",18,"ok",""],
+  ["","Rich Solar Controller","JR4/Dad",12,"ok",""],["273NXF","IQ4 for Iota","JR4/Dad",3,"buy",""],
+  ["","Latch Bracket with Latch mounted","JR4/Dad",16,"ok",""],["","Latch Bracket Incomplete","JR4/Dad",11,"ok",""],
+  ["800-12","Axle for Jr4","JR4/Dad",9,"ok",""],["4-8022-89-91w","Curly Cord","JR4/Dad",9,"ok",""],
+  ["","Hook and Go Decal","JR4/Dad",20,"ok",""],["EMX-Raven","Raven Sensor for JR4","JR4/Dad",2,"buy",""],
+  ["","OMJC Decal for JR4","JR4/Dad",21,"ok",""],["","4 Battery Hold for JR4","JR4/Dad",12,"ok",""],
+  ["","Single Battery Hold for JR4","JR4/Dad",0,"make",""],["810-5","Nylon Washer for Signal","JR4/Dad",78,"ok",""],
+  ["42034","3/8X3 U Bolt","JR4/Dad",36,"ok",""],["11302","5/16X2 U Bolt","JR4/Dad",18,"ok",""],
+  ["910-4","Orange Signal Nut","JR4/Dad",20,"ok",""],["500178","Plunger Pin 1/2","JR4/Dad",11,"ok",""],
+  ["3196T57","Winch","JR4/Dad",5,"buy",""],["","Document Holder for Jr4 Trailer","JR4/Dad",4,"buy",""],
+  ["900-19","Trailer Bolt Plate for JR4 Trailer","JR4/Dad",16,"ok",""],["","L Bolt Plate for Jr4 Trailer","JR4/Dad",9,"ok",""],
+  ["","Sign Brackets for JR4","JR4/Dad",2,"make",""],["910-6","Lanyard Clip","JR4/Dad",46,"ok",""],
+  ["","Antenna Heat Shrink","JR4/Dad",1,"buy","1 tube"],["023125","Handle Grips for Front Jack","JR4/Dad",160,"ok",""],
+  ["W31-X2M16-5","Power Switch-JR4","JR4/Dad",8,"buy",""],["","Low Volt Disconnect-Jr4","JR4/Dad",3,"make","May need to be reordered"],
+  ["","Volt Meter-Jr4","JR4/Dad",58,"ok",""],["4035","1/4 Spring-Jr4","JR4/Dad",66,"ok",""],
+  ["800-18-p","Switch Cover-Jr4","JR4/Dad",83,"ok",""],["","Rubber Toggle Cover","JR4/Dad",53,"ok",""],
+  ["","Made in America/Iowa Decal","JR4/Dad",39,"ok",""],["","Detent Pin with lanyard","JR4/Dad",28,"ok",""],
+  ["CCI-1450","5ft Lanyard","JR4/Dad",9,"buy",""],["0176933","Shoulder Bolt Stainless","JR4/Dad",48,"ok",""],
+  ["800-17-p","Lower Stop Strap","JR4/Dad",24,"ok",""],["810-6-p","Inner Mast Stop","JR4/Dad",110,"ok",""],
+  ["710-6","Nylon Pad","JR4/Dad",0,"out",""],["","3/4 Gold Washer for Axle","JR4/Dad",10,"ok",""],
+  ["1nwz3","12X3 Wheel","JR4/Dad",19,"ok",""],["7.22.4-10-20-au-st","Handle Plunger","JR4/Dad",3,"buy",""],
+  ["5094164","Combo Lock","JR4/Dad",0,"out",""],["910-6-TPL","Trailer Plunger Latch","JR4/Dad",8,"make","Part also marked 910-6"],
+  ["","Bolt for Trailer Plunger Latch","JR4/Dad",8,"buy",""],["910-4-RP","Ramp Pivot","JR4/Dad",13,"ok","Part also marked 910-4"],
+  ["","Rear Jacks Complete","JR4/Dad",16,"ok",""],["","Handles for Front Jack","JR4/Dad",4,"make",""],
+  ["","24V Lid Complete","JR4/Dad",4,"make",""],["","New Powa 24V Panel","JR4/Dad",2,"buy",""],
+  ["","12v Panel","JR4/Dad",0,"out",""],["","12 V Lids","JR4/Dad",7,"ok",""],
+  ["900-3","Rock Guards for JR4 Trailer","JR4/Dad",7,"ok",""],["","Fenders for JR4 Trailer","JR4/Dad",4,"make",""],
+  ["","Ramp Support For JR4","JR4/Dad",1,"make",""],["","Ramps","JR4/Dad",0,"make",""],
+  ["LPL31CB","License Plate Light","JR4/Dad",0,"out",""],["","Break Away Switch","JR4/Dad",0,"out",""],
+  ["","Masts","JR4/Dad",9,"ok",""],["","Street Smart Fender Decal","Pam",157,"ok",""],
+  ["","Street Smart Support Sticker","Pam",131,"ok",""],["","Tongue Decals","Pam",51,"ok",""],
+  ["","Solar Panel Decals","Pam",76,"ok",""],["","Taillight Harness","Pam",46,"ok",""],
+  ["","Pam Battery Kits","Pam",19,"ok",""],["2016K4","Round Louvers","Pam",46,"ok",""],
+  ["7003-P","L Battery Brackets","Pam",49,"ok",""],["8639","Liquid Tight Connector","Pam",145,"ok",""],
+  ["","Ribbed Conduit","Pam",0,"out",""],["","Mc4 Splitter","Pam",47,"ok",""],
+  ["150BBI.RV","AC/DC Plug","Pam",25,"ok",""],["302112-025","J Hooks","Pam",35,"ok",""],
+  ["7006-25","Threaded Rod","Pam",10,"buy",""],["STL-22RBK","Taillight Grommets","Pam",95,"ok",""],
+  ["STL22RB","Taillights","Pam",56,"ok",""],["A45PB","Taillight Pig Tails","Pam",300,"ok","Estimate of total"],
+  ["","Multi Tools","Pam",36,"ok",""],["","Streetsmart Side Decal","Pam",47,"ok",""],
+  ["7004-P","Center Battery Hold","Pam",11,"ok",""],["Z300-19-P-C","Pneumatic Strut Mount Complete","Pam",18,"ok","Also marked Z300-19-P"],
+  ["Z300-19-P","Pneumatic Strut Mount","Pam",12,"ok",""],["PM3-50-24LK","Power Max","Pam",8,"buy",""],
+  ["PS-MPPT-40M","Morning Star","Pam",14,"ok",""],["","Danger Decal","Pam",51,"ok",""],
+  ["","Made in USA Decal","Pam",43,"ok",""],["","Anti Skid","Pam",250,"ok","Estimate of total"],
+  ["","Grease","Pam",1,"buy",""],["","Flex Seal","Pam",1,"buy",""],
+  ["","Draw Latch","Pam",94,"ok",""],["25613","Hitch Pin","Pam",67,"ok",""],
+  ["","1 inch Foam","Pam",6,"ok","6 rolls"],["","2 Inch Foam","Pam",1,"buy","1 roll"],
+  ["Z320-00-P","Unfinished Tongues","Pam",18,"ok",""],["A200C0317-P","Ball Coupler","Pam",14,"ok",""],
+  ["","Ball Coupler Pin","Pam",19,"ok",""],["26-40-P","Backbones Complete","Pam",6,"make",""],
+  ["","Finished Tongues","Pam",4,"make",""],["2315-P","Fenders","Pam",0,"make",""],
+  ["","Masts","Pam",0,"make",""],["SSR-Z300-14 REV C","Lids","Pam",0,"make",""],
+  ["Z300-7005-P","Battery Divider T Bar","Pam",44,"ok",""],["","Branz Taillight Harness","JR4/Dad",0,"make",""],
+  ["900-11","Branz Tongue","JR4/Dad",0,"make",""],["41119","Rubber Bumper","JR4/Dad",0,"ok","Qty was blank on sheet"]
+];
+
+function uid() { return (crypto.randomUUID && crypto.randomUUID()) || ("id-" + Math.random().toString(36).slice(2) + Date.now().toString(36)); }
+function slugSku(name) { return name.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24); }
+function inferSource(name, status) {
+  if (status === "make") return "make";
+  if (status === "buy") return "order";
+  const n = String(name || "").toLowerCase();
+  if (/lid|mast|tongue|fender|ramp|bracket|battery hold|backbone|divider|rear jack|rock guard|bolt plate|strut mount|stop strap|mast stop|switch cover|nylon pad|handles for front|document holder|sign bracket|latch bracket/.test(n)) return "make";
+  return "order";
+}
+function sourceLabel(s) { return s === "make" ? "Made by us" : "Ordered"; }
+function inferColor(name, category, source) {
+  if (String(category||"").toLowerCase().includes("pam") && source === "make") return "both";
+  return "n/a";
+}
+function colorLabel(c) {
+  return ({ white: "White", orange: "Orange", both: "Both", "n/a": "—" })[c] || "—";
+}
+function usesColorCounts(item) {
+  const c = item && item.color;
+  return c === "white" || c === "orange";
+}
+function totalQty(item) {
+  if (!item) return 0;
+  if (item.color === "white") return Number(item.qtyWhite || 0);
+  if (item.color === "orange") return Number(item.qtyOrange || 0);
+  return Number(item.qty || 0);
+}
+function syncColorQtys(item) {
+  const next = Object.assign({}, item);
+  // Keep an explicit 0; only fill in when the field was never set
+  const hadWhite = next.qtyWhite != null && next.qtyWhite !== "";
+  const hadOrange = next.qtyOrange != null && next.qtyOrange !== "";
+  next.qtyWhite = Number(next.qtyWhite || 0);
+  next.qtyOrange = Number(next.qtyOrange || 0);
+  next.qty = Number(next.qty || 0);
+  if (next.color === "white") {
+    if (!hadWhite && next.qty) next.qtyWhite = next.qty;
+    next.qty = next.qtyWhite;
+  } else if (next.color === "orange") {
+    if (!hadOrange && next.qty) next.qtyOrange = next.qty;
+    next.qty = next.qtyOrange;
+  }
+  return next;
+}
+function buildCatalog() {
+  const used = new Set();
+  return catalog.map(row => {
+    let [sku, name, category, qty, status, notes] = row;
+    sku = sku || slugSku(name);
+    let base = sku, n = 2;
+    while (used.has(sku.toLowerCase())) { sku = base + "-" + n; n++; }
+    used.add(sku.toLowerCase());
+    const reorder = status === "ok" ? Math.max(1, Math.floor(qty * 0.15)) : Math.max(qty, 1);
+    const source = inferSource(name, status);
+    const color = inferColor(name, category, source);
+    return syncColorQtys({ id: uid(), name, sku, category, qty, reorder, location: "", notes, status, source, color });
+  });
+}
+function load() {
+  try { items = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch { items = []; }
+  if (!items.length) { items = buildCatalog(); save(); return; }
+  let changed = false;
+  items = items.map(it => {
+    let next = it;
+    if (it.source !== "order" && it.source !== "make") {
+      changed = true;
+      next = Object.assign({}, next, { source: inferSource(it.name, it.status) });
+    }
+    if (!["white","orange","both","n/a"].includes(next.color)) {
+      changed = true;
+      next = Object.assign({}, next, { color: inferColor(next.name, next.category, next.source) });
+    }
+    next.category = normCat(next.category);
+    return syncColorQtys(next);
+  });
+  save();
+}
+function save() {
+  localStorage.setItem(KEY, JSON.stringify(items));
+  pushShare();
+}
+function setShareStatus(msg) {
+  if ($("shareStatus")) $("shareStatus").textContent = msg;
+  if ($("syncNote")) $("syncNote").textContent = shareId
+    ? ("Live sync on. Code: " + shareId + " — open this same app on another device and join that code.")
+    : "This copy is saved on this device only until you click Share / sync.";
+}
+function sharePayload() {
+  return { name: "Chancellor 6502", updatedAt: Date.now(), items };
+}
+function topicFor(code) {
+  return "stockroom/chancellor6502/" + String(code || "").trim().toLowerCase();
+}
+function loadMqtt() {
+  return new Promise((resolve, reject) => {
+    if (window.mqtt) return resolve(window.mqtt);
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/mqtt@5.10.4/dist/mqtt.min.js";
+    s.onload = () => window.mqtt ? resolve(window.mqtt) : reject(new Error("mqtt missing"));
+    s.onerror = () => reject(new Error("Could not load sync library"));
+    document.head.appendChild(s);
+  });
+}
+function applyRemote(data) {
+  if (!data || !Array.isArray(data.items)) return;
+  if (data.updatedAt && data.updatedAt <= lastRemoteAt) return;
+  applyingRemote = true;
+  items = data.items.map(it => Object.assign({}, it, { category: normCat(it.category) }));
+  lastRemoteAt = data.updatedAt || Date.now();
+  localStorage.setItem(KEY, JSON.stringify(items));
+  render();
+  applyingRemote = false;
+  setShareStatus("Live · synced " + new Date(lastRemoteAt).toLocaleTimeString());
+}
+async function connectShare() {
+  if (!shareId) return;
+  setShareStatus("Connecting…");
+  try {
+    const mqtt = await loadMqtt();
+    if (mqttClient) { try { mqttClient.end(true); } catch {} mqttClient = null; }
+    let lastErr = null;
+    for (const url of MQTT_URLS) {
+      try {
+        mqttClient = await new Promise((resolve, reject) => {
+          const c = mqtt.connect(url, { reconnectPeriod: 4000, connectTimeout: 8000, clean: true });
+          const t = setTimeout(() => reject(new Error("timeout " + url)), 9000);
+          c.on("connect", () => { clearTimeout(t); resolve(c); });
+          c.on("error", err => { clearTimeout(t); reject(err); });
+        });
+        lastErr = null;
+        break;
+      } catch (err) { lastErr = err; }
+    }
+    if (!mqttClient) throw lastErr || new Error("no broker");
+    mqttClient.subscribe(topicFor(shareId), { qos: 1 });
+    mqttClient.on("message", (_topic, buf) => {
+      try { applyRemote(JSON.parse(String(buf))); } catch {}
+    });
+    mqttClient.on("reconnect", () => setShareStatus("Reconnecting…"));
+    mqttClient.on("offline", () => setShareStatus("Offline — changes stay on this device until reconnect."));
+    setShareStatus("Connected. Code: " + shareId);
+    pushShare();
+  } catch (err) {
+    setShareStatus("Could not connect. Use internet, or Export CSV and send that file instead. " + (err && err.message ? err.message : ""));
+  }
+}
+function pushShare() {
+  if (!shareId || !mqttClient || applyingRemote) return;
+  const payload = sharePayload();
+  lastRemoteAt = payload.updatedAt;
+  try {
+    mqttClient.publish(topicFor(shareId), JSON.stringify(payload), { qos: 1, retain: true });
+  } catch {}
+}
+async function createShare() {
+  shareId = "C6502-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+  localStorage.setItem(SHARE_KEY, shareId);
+  $("shareCode").value = shareId;
+  await connectShare();
+  toast("Share room ready");
+}
+async function joinShare() {
+  const code = ($("shareCode").value || "").trim();
+  if (!code) { setShareStatus("Paste a share code first."); return; }
+  shareId = code;
+  localStorage.setItem(SHARE_KEY, shareId);
+  await connectShare();
+  toast("Joined shared list");
+}
+function leaveShare() {
+  shareId = "";
+  localStorage.removeItem(SHARE_KEY);
+  if (mqttClient) { try { mqttClient.end(true); } catch {} mqttClient = null; }
+  $("shareCode").value = "";
+  setShareStatus("Disconnected. This device now keeps its own copy.");
+}
+function startPoll() {}
+function pullShare() { return connectShare(); }
+function statusOf(item) {
+  if (item.status && ["ok","buy","make","out"].includes(item.status)) {
+    if (item.status === "ok" && totalQty(item) <= 0) return "out";
+    return item.status;
+  }
+  if (totalQty(item) <= 0) return "out";
+  return "ok";
+}
+function statusLabel(s) {
+  return ({ ok: "In stock", buy: "Re-purchase needed", make: "Production needed", out: "Out of stock" })[s] || s;
+}
+function normCat(c) {
+  const s = String(c || "").trim().replace(/\s+/g, " ");
+  const low = s.toLowerCase();
+  if (!s) return "";
+  if (low.includes("pam")) return "Pam";
+  if (low.includes("jr4") || low.includes("dad")) return "JR4/Dad";
+  return s;
+}
+function isPam(item) {
+  return normCat(item && item.category) === "Pam";
+}
+function findAllByCode(code) {
+  const c = String(code || "").trim().toLowerCase();
+  if (!c) return [];
+  return items.filter(i => String(i.sku || "").toLowerCase() === c);
+}
+function findByCode(code) {
+  const list = findAllByCode(code);
+  return list[0] || null;
+}
+function toast(msg) {
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+function escapeHtml(str) {
+  return String(str ?? "").replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+}
+function filtered() {
+  const q = $("search").value.trim().toLowerCase();
+  const st = $("statusFilter").value, cat = $("catFilter").value, src = $("sourceFilter").value;
+  const col = $("colorFilter") ? $("colorFilter").value : "all";
+  return items.filter(it => {
+    const hay = [it.name, it.sku, it.category, it.location, it.notes, sourceLabel(it.source), colorLabel(it.color)].join(" ").toLowerCase();
+    if (q && !hay.includes(q)) return false;
+    if (st !== "all" && statusOf(it) !== st) return false;
+    if (cat !== "all" && normCat(it.category) !== cat) return false;
+    if (src !== "all" && (it.source || inferSource(it.name, it.status)) !== src) return false;
+    if (col !== "all") {
+      const c = it.color || inferColor(it.name, it.category, it.source);
+      if (c !== col && !(col !== "both" && c === "both")) return false;
+    }
+    return true;
+  }).sort((a, b) => {
+    let va = a[sortKey], vb = b[sortKey];
+    if (sortKey === "status") { va = statusLabel(statusOf(a)); vb = statusLabel(statusOf(b)); }
+    if (sortKey === "source") { va = sourceLabel(a.source); vb = sourceLabel(b.source); }
+    if (sortKey === "color") { va = colorLabel(a.color); vb = colorLabel(b.color); }
+    if (sortKey === "qty") return (Number(va) - Number(vb)) * sortDir;
+    const cmp = String(va || "").localeCompare(String(vb || ""), undefined, { numeric: true });
+    return cmp !== 0 ? cmp * sortDir : String(a.name || "").localeCompare(String(b.name || ""));
+  });
+}
+function render() {
+  const cats = [...new Set(items.map(i => normCat(i.category)).filter(Boolean))].sort();
+  const sel = $("catFilter"), current = sel.value;
+  sel.innerHTML = `<option value="all">All categories</option>` + cats.map(c => `<option>${escapeHtml(c)}</option>`).join("");
+  sel.value = [...sel.options].some(o => o.value === current) ? current : "all";
+  $("catList").innerHTML = cats.map(c => `<option value="${escapeHtml(c)}"></option>`).join("");
+  $("statSkus").textContent = items.length;
+  $("statUnits").textContent = items.reduce((s, i) => s + totalQty(i), 0);
+  const w = items.reduce((s, i) => s + Number(i.qtyWhite || 0), 0);
+  const o = items.reduce((s, i) => s + Number(i.qtyOrange || 0), 0);
+  if ($("statColors")) $("statColors").textContent = w + " / " + o;
+  $("statLow").textContent = items.filter(i => statusOf(i) !== "ok").length;
+  $("tbody").innerHTML = filtered().map(it => {
+    const st = statusOf(it), src = it.source || inferSource(it.name, it.status);
+    return `<tr data-id="${it.id}">
+      <td><strong>${escapeHtml(it.name)}</strong></td>
+      <td class="sku">${escapeHtml(it.sku)}</td>
+      <td>${escapeHtml(it.category)}</td>
+      <td><span class="badge ${src}">${sourceLabel(src)}</span></td>
+      <td><span class="badge ${it.color||"n/a"}">${colorLabel(it.color)}</span></td>
+      <td>${it.color === "white" ? ("W " + Number(it.qtyWhite||0)) : it.color === "orange" ? ("O " + Number(it.qtyOrange||0)) : Number(it.qty||0)}</td>
+      <td><span class="badge ${st}">${statusLabel(st)}</span></td>
+      <td><button type="button" class="icon-btn" data-edit="${it.id}">Edit</button>
+          <button type="button" class="icon-btn" data-del="${it.id}">Delete</button></td>
+    </tr>`;
+  }).join("");
+}
+function openModal(item, presetSku) {
+  editingId = item ? item.id : null;
+  $("modalTitle").textContent = item ? "Edit item" : "Add item";
+  $("name").value = item?.name || "";
+  $("sku").value = item?.sku || presetSku || "";
+  $("category").value = item?.category || "";
+  $("qty").value = item?.qty ?? 0;
+  $("qtyWhite").value = item?.qtyWhite ?? 0;
+  $("qtyOrange").value = item?.qtyOrange ?? 0;
+  $("reorder").value = item?.reorder ?? 5;
+  $("itemStatus").value = ["ok","buy","make","out"].includes(item?.status) ? item.status : "ok";
+  $("itemSource").value = item?.source || inferSource(item?.name, item?.status);
+  $("itemColor").value = ["white","orange","both","n/a"].includes(item?.color) ? item.color : inferColor(item?.name, item?.category, $("itemSource").value);
+  $("location").value = item?.location || "";
+  $("notes").value = item?.notes || "";
+  $("modalBg").classList.add("open");
+  $("dupBtn").style.display = item ? "" : "none";
+  toggleQtyFields();
+}
+function closeModal() { $("modalBg").classList.remove("open"); $("form").reset(); editingId = null; }
+function toggleQtyFields() {
+  const color = $("itemColor").value;
+  $("qtyField").style.display = (color === "white" || color === "orange") ? "none" : "";
+  $("qtyWhiteField").style.display = color === "white" ? "" : "none";
+  $("qtyOrangeField").style.display = color === "orange" ? "" : "none";
+}
+$("itemColor").onchange = toggleQtyFields;
+
+$("addBtn").onclick = () => openModal(null);
+$("dupBtn").onclick = () => {
+  if (!$("name").value.trim()) return;
+  editingId = null;
+  $("modalTitle").textContent = "Add item";
+  const sku = $("sku").value.trim();
+  if (sku && !String($("category").value).toLowerCase().includes("pam")) {
+    $("sku").value = sku + "-2";
+  }
+  toast("This is a new copy. Change color or qty, then save.");
+};
+$("cancelBtn").onclick = closeModal;
+$("modalBg").addEventListener("click", e => { if (e.target === $("modalBg")) closeModal(); });
+$("form").onsubmit = (e) => {
+  e.preventDefault();
+  const color = $("itemColor").value || "n/a";
+  const qty = Number($("qty").value || 0);
+  const qtyWhite = Number($("qtyWhite").value || 0);
+  const qtyOrange = Number($("qtyOrange").value || 0);
+  const rec = {
+    id: editingId || uid(),
+    name: $("name").value.trim(),
+    sku: $("sku").value.trim(),
+    category: normCat($("category").value),
+    qty: color === "white" ? qtyWhite : color === "orange" ? qtyOrange : qty,
+    qtyWhite, qtyOrange,
+    reorder: Number($("reorder").value || 0),
+    status: $("itemStatus").value || "ok",
+    source: $("itemSource").value || "order",
+    color,
+    location: $("location").value.trim(),
+    notes: $("notes").value.trim()
+  };
+  Object.assign(rec, syncColorQtys(rec));
+  const skuClash = items.filter(i => i.sku.toLowerCase() === rec.sku.toLowerCase() && i.id !== rec.id);
+  if (skuClash.length && !(isPam(rec) && skuClash.every(isPam))) {
+    alert("That SKU already exists outside the Pam list. Pam parts can be duplicated."); return;
+  }
+  if (editingId) items = items.map(i => i.id === editingId ? rec : i);
+  else items.push(rec);
+  save(); closeModal(); render();
+};
+$("tbody").addEventListener("click", (e) => {
+  const del = e.target.closest("[data-del]");
+  const edit = e.target.closest("[data-edit]");
+  const row = e.target.closest("tr[data-id]");
+  if (del) {
+    const it = items.find(i => i.id === del.dataset.del);
+    if (it && confirm('Delete "' + it.name + '"?')) { items = items.filter(i => i.id !== it.id); save(); render(); }
+    return;
+  }
+  const id = (edit && edit.dataset.edit) || (row && row.dataset.id);
+  const it = items.find(i => i.id === id);
+  if (it) openModal(it);
+});
+$("search").oninput = render;
+$("statusFilter").onchange = render;
+$("catFilter").onchange = render;
+$("sourceFilter").onchange = render;
+$("colorFilter").onchange = render;
+document.querySelectorAll("th[data-sort]").forEach(th => {
+  th.onclick = () => {
+    const key = th.dataset.sort;
+    if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = 1; }
+    render();
+  };
+});
+$("seedBtn").onclick = () => {
+  if (items.length && !confirm("Replace with the Chancellor 6502 list?")) return;
+  items = buildCatalog(); save(); render();
+};
+$("exportBtn").onclick = () => {
+  const headers = ["name","sku","category","qty","qtyWhite","qtyOrange","reorder","status","source","color","location","notes"];
+  const esc = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
+  const csv = [headers.join(","), ...items.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = "chancellor-6502-inventory.csv"; a.click();
+};
+$("exportExcelBtn").onclick = async () => {
+  if (!window.XLSX) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
+      s.onload = resolve; s.onerror = () => reject(new Error("Could not load Excel library"));
+      document.head.appendChild(s);
+    }).catch(() => { alert("Could not load the Excel library. Use Export CSV instead, then open that in Excel."); return; });
+  }
+  if (!window.XLSX) return;
+  const headers = ["Name","SKU / barcode","Category","Qty","White qty","Orange qty","Reorder","Status","How we get it","Color","Location","Notes"];
+  const rows = items.map(it => [
+    it.name || "", it.sku || "", it.category || "",
+    Number(it.qty || 0), Number(it.qtyWhite || 0), Number(it.qtyOrange || 0),
+    Number(it.reorder || 0),
+    statusLabel(statusOf(it)), sourceLabel(it.source), colorLabel(it.color),
+    it.location || "", it.notes || ""
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws["!cols"] = [{wch:28},{wch:18},{wch:12},{wch:8},{wch:12},{wch:12},{wch:10},{wch:20},{wch:16},{wch:10},{wch:16},{wch:28}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Inventory");
+  XLSX.writeFile(wb, "chancellor-6502-inventory.xlsx");
+  toast("Excel file downloaded");
+};
+$("importBtn").onclick = () => $("fileInput").click();
+$("fileInput").onchange = (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const lines = String(reader.result).replace(/\r/g,"").split("\n").filter(Boolean);
+    if (lines.length < 2) return;
+    const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g,"").toLowerCase());
+    lines.slice(1).forEach(line => {
+      const cols = line.split(",").map(c => c.replace(/^"|"$/g,""));
+      const obj = {}; headers.forEach((h,i) => obj[h] = (cols[i]||"").trim());
+      const name = obj.name || "Untitled";
+      const status = ["ok","buy","make","out"].includes(obj.status) ? obj.status : "ok";
+      const category = normCat(obj.category);
+      const source = obj.source === "make" || obj.source === "order" ? obj.source : inferSource(name, status);
+      const color = ["white","orange","both","n/a"].includes(obj.color) ? obj.color : inferColor(name, category, source);
+      const row = syncColorQtys({
+        id: uid(), name, sku: obj.sku || slugSku(name), category,
+        qty: Number(obj.qty || 0),
+        qtyWhite: Number(obj.qtywhite || obj.qty_white || 0),
+        qtyOrange: Number(obj.qtyorange || obj.qty_orange || 0),
+        reorder: Number(obj.reorder || 0), status, source, color,
+        location: obj.location || "", notes: obj.notes || ""
+      });
+      const idx = items.findIndex(i =>
+        String(i.sku||"").toLowerCase() === row.sku.toLowerCase() &&
+        normCat(i.category) === row.category &&
+        String(i.name||"").toLowerCase() === row.name.toLowerCase() &&
+        (i.color || "n/a") === (row.color || "n/a")
+      );
+      if (idx >= 0) items[idx] = Object.assign({}, items[idx], row, { id: items[idx].id });
+      else items.push(row);
+    });
+    save(); render();
+  };
+  reader.readAsText(file); e.target.value = "";
+};
+
+document.querySelectorAll(".chip[data-mode]").forEach(c => c.onclick = () => {
+  scanMode = c.dataset.mode;
+  document.querySelectorAll(".chip[data-mode]").forEach(x => x.classList.toggle("on", x === c));
+});
+function showScanError(msg) { const el = $("scanError"); el.textContent = msg; el.classList.toggle("show", !!msg); }
+async function startCamera() {
+  showScanError("");
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showScanError("No camera API. Use Scan photo or type the code."); return;
+  }
+  if (location.protocol === "file:") showScanError("Camera is blocked on a local file. Use start-local-server.py or Scan photo.");
+  try { mediaStream = await navigator.mediaDevices.getUserMedia({ audio:false, video:{ facingMode:{ ideal:"environment" } } }); }
+  catch { try { mediaStream = await navigator.mediaDevices.getUserMedia({ audio:false, video:true }); } catch { showScanError("Could not start camera."); return; } }
+  $("scanVideo").srcObject = mediaStream;
+  try { await $("scanVideo").play(); } catch {}
+  if ("BarcodeDetector" in window) {
+    try { barcodeDetector = new BarcodeDetector({ formats:["ean_13","ean_8","upc_a","code_128","code_39","qr_code"] }); }
+    catch { barcodeDetector = new BarcodeDetector(); }
+    scanLoopOn = true; tickDetect();
+  } else showScanError("Live decode needs Chrome or Edge. Use Scan photo.");
+}
+function tickDetect() {
+  if (!scanLoopOn || !barcodeDetector) return;
+  const video = $("scanVideo");
+  if (video.readyState >= 2) barcodeDetector.detect(video).then(codes => { if (codes[0] && codes[0].rawValue) handleScan(codes[0].rawValue); }).catch(()=>{});
+  requestAnimationFrame(tickDetect);
+}
+function stopCamera() {
+  scanLoopOn = false;
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  $("scanVideo").srcObject = null;
+}
+async function openScanner(fromForm) { formWantsScan = !!fromForm; $("scanBg").classList.add("open"); await startCamera(); }
+function closeScanner() { $("scanBg").classList.remove("open"); stopCamera(); formWantsScan = false; }
+$("scanBtn").onclick = () => openScanner(false);
+$("formScanBtn").onclick = () => openScanner(true);
+$("closeScanBtn").onclick = closeScanner;
+$("manualGo").onclick = () => handleScan($("manualCode").value);
+$("photoBtn").onclick = () => $("photoInput").click();
+$("photoInput").onchange = async (e) => {
+  const file = e.target.files && e.target.files[0]; e.target.value = "";
+  if (!file || !("BarcodeDetector" in window)) return;
+  try {
+    const codes = await new BarcodeDetector().detect(await createImageBitmap(file));
+    if (codes[0] && codes[0].rawValue) handleScan(codes[0].rawValue); else showScanError("No barcode found.");
+  } catch { showScanError("Could not read photo."); }
+};
+function handleScan(raw) {
+  const code = String(raw || "").trim(); if (!code) return;
+  const now = Date.now(); if (code === lastScan.code && now - lastScan.at < 1200) return;
+  lastScan = { code, at: now };
+  if (formWantsScan && $("modalBg").classList.contains("open")) { $("sku").value = code; closeScanner(); return; }
+  const matches = findAllByCode(code);
+  const found = matches[0];
+  if (scanMode === "add" || !found) { closeScanner(); if (!found && !confirm('No item for "' + code + '". Create it?')) return; openModal(null, code); return; }
+  if (matches.length > 1) {
+    closeScanner();
+    const pick = matches.map((it, i) => (i+1) + ". " + it.name + " · " + (it.category||"") + " · " + colorLabel(it.color) + " · qty " + totalQty(it)).join("\n");
+    const n = Number(prompt("Multiple Pam rows use this code:\n" + pick + "\n\nType the number to use:"));
+    const chosen = matches[n-1];
+    if (!chosen) return;
+    if (scanMode === "lookup") { openModal(chosen); return; }
+    if (usesColorCounts(chosen)) chosen.qtyWhite = Number(chosen.qtyWhite || 0) + 1;
+    else chosen.qty = Number(chosen.qty || 0) + 1;
+    Object.assign(chosen, syncColorQtys(chosen));
+    save(); render(); toast(chosen.name + ": now " + totalQty(chosen)); openHit(chosen);
+    return;
+  }
+  if (scanMode === "lookup") { closeScanner(); openModal(found); return; }
+  if (usesColorCounts(found)) found.qtyWhite = Number(found.qtyWhite || 0) + 1;
+  else found.qty = Number(found.qty || 0) + 1;
+  Object.assign(found, syncColorQtys(found));
+  save(); render(); toast(found.name + ": now " + totalQty(found)); openHit(found);
+}
+function openHit(item) {
+  pendingHit = item;
+  $("hitName").textContent = item.name; $("hitSku").textContent = item.sku;
+  $("hitMeta").textContent = sourceLabel(item.source) + " · " + colorLabel(item.color) + " · On hand " + totalQty(item);
+  if ($("hitColorField")) $("hitColorField").style.display = usesColorCounts(item) ? "" : "none";
+  $("hitBg").classList.add("open");
+}
+function applyDelta(sign) {
+  if (!pendingHit) return;
+  const item = items.find(i => i.id === pendingHit.id); if (!item) return;
+  const n = sign * Math.max(1, Number($("hitDelta").value || 1));
+  if (usesColorCounts(item)) {
+    const which = ($("hitColor") && $("hitColor").value) || "white";
+    if (which === "orange") item.qtyOrange = Math.max(0, Number(item.qtyOrange || 0) + n);
+    else item.qtyWhite = Math.max(0, Number(item.qtyWhite || 0) + n);
+    Object.assign(item, syncColorQtys(item));
+  } else {
+    item.qty = Math.max(0, Number(item.qty || 0) + n);
+  }
+  save(); render(); openHit(item);
+}
+$("hitIn").onclick = () => applyDelta(1);
+$("hitOut").onclick = () => applyDelta(-1);
+$("qtyPlus").onclick = () => { $("hitDelta").value = Number($("hitDelta").value || 1) + 1; };
+$("qtyMinus").onclick = () => { $("hitDelta").value = Math.max(1, Number($("hitDelta").value || 1) - 1); };
+$("hitEdit").onclick = () => { const it = pendingHit; $("hitBg").classList.remove("open"); if (it) openModal(it); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeModal(); closeScanner(); $("hitBg").classList.remove("open"); $("shareBg").classList.remove("open"); } });
+$("shareBtn").onclick = () => {
+  $("shareCode").value = shareId;
+  $("shareBg").classList.add("open");
+  setShareStatus(shareId ? ("Connected. Code: " + shareId) : "Not connected.");
+};
+$("closeShareBtn").onclick = () => $("shareBg").classList.remove("open");
+$("createShareBtn").onclick = createShare;
+$("joinShareBtn").onclick = joinShare;
+$("leaveShareBtn").onclick = leaveShare;
+$("copyShareBtn").onclick = async () => {
+  const code = $("shareCode").value.trim();
+  if (!code) return;
+  try { await navigator.clipboard.writeText(code); toast("Code copied"); } catch { toast(code); }
+};
+$("shareBg").addEventListener("click", e => { if (e.target === $("shareBg")) $("shareBg").classList.remove("open"); });
+load();
+render();
+if (shareId) { $("shareCode").value = shareId; setShareStatus("Reconnecting…"); pullShare(true); startPoll(); }
+else setShareStatus("Not connected.");
+
+</script>
+</body>
+</html>

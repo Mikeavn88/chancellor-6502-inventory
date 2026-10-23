@@ -119,6 +119,7 @@
             <th data-sort="color">Color</th>
             <th data-sort="qty">Qty</th>
             <th data-sort="status">Status</th>
+            <th data-sort="updatedAt">Updated</th>
             <th></th>
           </tr>
         </thead>
@@ -163,6 +164,7 @@
         </div>
         <div class="field"><label>Location</label><input id="location" /></div>
         <div class="field full"><label>Notes</label><textarea id="notes"></textarea></div>
+        <div class="field full"><label>Last updated</label><input id="updatedAt" disabled /></div>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn" id="dupBtn">Duplicate</button>
@@ -309,6 +311,17 @@ const catalog = [
 ];
 
 function uid() { return (crypto.randomUUID && crypto.randomUUID()) || ("id-" + Math.random().toString(36).slice(2) + Date.now().toString(36)); }
+function stamp(item) {
+  if (!item) return item;
+  item.updatedAt = new Date().toISOString();
+  return item;
+}
+function formatUpdated(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return String(ts);
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
 function slugSku(name) { return name.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24); }
 function inferSource(name, status) {
   if (status === "make") return "make";
@@ -363,7 +376,7 @@ function buildCatalog() {
     const reorder = status === "ok" ? Math.max(1, Math.floor(qty * 0.15)) : Math.max(qty, 1);
     const source = inferSource(name, status);
     const color = inferColor(name, category, source);
-    return syncColorQtys({ id: uid(), name, sku, category, qty, reorder, location: "", notes, status, source, color });
+    return stamp(syncColorQtys({ id: uid(), name, sku, category, qty, reorder, location: "", notes, status, source, color }));
   });
 }
 function load() {
@@ -546,7 +559,11 @@ function filtered() {
     if (sortKey === "status") { va = statusLabel(statusOf(a)); vb = statusLabel(statusOf(b)); }
     if (sortKey === "source") { va = sourceLabel(a.source); vb = sourceLabel(b.source); }
     if (sortKey === "color") { va = colorLabel(a.color); vb = colorLabel(b.color); }
-    if (sortKey === "qty") return (Number(va) - Number(vb)) * sortDir;
+    if (sortKey === "updatedAt") {
+      va = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      vb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return (va - vb) * sortDir;
+    }
     const cmp = String(va || "").localeCompare(String(vb || ""), undefined, { numeric: true });
     return cmp !== 0 ? cmp * sortDir : String(a.name || "").localeCompare(String(b.name || ""));
   });
@@ -573,6 +590,7 @@ function render() {
       <td><span class="badge ${it.color||"n/a"}">${colorLabel(it.color)}</span></td>
       <td>${it.color === "white" ? ("W " + Number(it.qtyWhite||0)) : it.color === "orange" ? ("O " + Number(it.qtyOrange||0)) : Number(it.qty||0)}</td>
       <td><span class="badge ${st}">${statusLabel(st)}</span></td>
+      <td title="${escapeHtml(it.updatedAt || "")}">${escapeHtml(formatUpdated(it.updatedAt))}</td>
       <td><button type="button" class="icon-btn" data-edit="${it.id}">Edit</button>
           <button type="button" class="icon-btn" data-del="${it.id}">Delete</button></td>
     </tr>`;
@@ -593,6 +611,7 @@ function openModal(item, presetSku) {
   $("itemColor").value = ["white","orange","both","n/a"].includes(item?.color) ? item.color : inferColor(item?.name, item?.category, $("itemSource").value);
   $("location").value = item?.location || "";
   $("notes").value = item?.notes || "";
+  if ($("updatedAt")) $("updatedAt").value = item ? formatUpdated(item.updatedAt) : "Not saved yet";
   $("modalBg").classList.add("open");
   $("dupBtn").style.display = item ? "" : "none";
   toggleQtyFields();
@@ -640,6 +659,7 @@ $("form").onsubmit = (e) => {
     notes: $("notes").value.trim()
   };
   Object.assign(rec, syncColorQtys(rec));
+  stamp(rec);
   const skuClash = items.filter(i => i.sku.toLowerCase() === rec.sku.toLowerCase() && i.id !== rec.id);
   if (skuClash.length && !(isPam(rec) && skuClash.every(isPam))) {
     alert("That SKU already exists outside the Pam list. Pam parts can be duplicated."); return;
@@ -678,7 +698,7 @@ $("seedBtn").onclick = () => {
   items = buildCatalog(); save(); render();
 };
 $("exportBtn").onclick = () => {
-  const headers = ["name","sku","category","qty","qtyWhite","qtyOrange","reorder","status","source","color","location","notes"];
+  const headers = ["name","sku","category","qty","qtyWhite","qtyOrange","reorder","status","source","color","location","notes","updatedAt"];
   const esc = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
   const csv = [headers.join(","), ...items.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
   const a = document.createElement("a");
@@ -695,13 +715,13 @@ $("exportExcelBtn").onclick = async () => {
     }).catch(() => { alert("Could not load the Excel library. Use Export CSV instead, then open that in Excel."); return; });
   }
   if (!window.XLSX) return;
-  const headers = ["Name","SKU / barcode","Category","Qty","White qty","Orange qty","Reorder","Status","How we get it","Color","Location","Notes"];
+  const headers = ["Name","SKU / barcode","Category","Qty","White qty","Orange qty","Reorder","Status","How we get it","Color","Location","Notes","Last updated"];
   const rows = items.map(it => [
     it.name || "", it.sku || "", it.category || "",
     Number(it.qty || 0), Number(it.qtyWhite || 0), Number(it.qtyOrange || 0),
     Number(it.reorder || 0),
     statusLabel(statusOf(it)), sourceLabel(it.source), colorLabel(it.color),
-    it.location || "", it.notes || ""
+    it.location || "", it.notes || "", formatUpdated(it.updatedAt)
   ]);
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   ws["!cols"] = [{wch:28},{wch:18},{wch:12},{wch:8},{wch:12},{wch:12},{wch:10},{wch:20},{wch:16},{wch:10},{wch:16},{wch:28}];
@@ -726,14 +746,17 @@ $("fileInput").onchange = (e) => {
       const category = normCat(obj.category);
       const source = obj.source === "make" || obj.source === "order" ? obj.source : inferSource(name, status);
       const color = ["white","orange","both","n/a"].includes(obj.color) ? obj.color : inferColor(name, category, source);
-      const row = syncColorQtys({
+      const row = stamp(syncColorQtys({
         id: uid(), name, sku: obj.sku || slugSku(name), category,
         qty: Number(obj.qty || 0),
         qtyWhite: Number(obj.qtywhite || obj.qty_white || 0),
         qtyOrange: Number(obj.qtyorange || obj.qty_orange || 0),
         reorder: Number(obj.reorder || 0), status, source, color,
-        location: obj.location || "", notes: obj.notes || ""
-      });
+        location: obj.location || "", notes: obj.notes || "",
+        updatedAt: obj.updatedat || obj.updated_at || obj["last updated"] || new Date().toISOString()
+      }));
+      delete row.updatedAt;
+      row.updatedAt = obj.updatedat || obj.updated_at || obj["last updated"] || new Date().toISOString();
       const idx = items.findIndex(i =>
         String(i.sku||"").toLowerCase() === row.sku.toLowerCase() &&
         normCat(i.category) === row.category &&
@@ -813,6 +836,7 @@ function handleScan(raw) {
     if (usesColorCounts(chosen)) chosen.qtyWhite = Number(chosen.qtyWhite || 0) + 1;
     else chosen.qty = Number(chosen.qty || 0) + 1;
     Object.assign(chosen, syncColorQtys(chosen));
+    stamp(chosen);
     save(); render(); toast(chosen.name + ": now " + totalQty(chosen)); openHit(chosen);
     return;
   }
@@ -820,12 +844,13 @@ function handleScan(raw) {
   if (usesColorCounts(found)) found.qtyWhite = Number(found.qtyWhite || 0) + 1;
   else found.qty = Number(found.qty || 0) + 1;
   Object.assign(found, syncColorQtys(found));
+  stamp(found);
   save(); render(); toast(found.name + ": now " + totalQty(found)); openHit(found);
 }
 function openHit(item) {
   pendingHit = item;
   $("hitName").textContent = item.name; $("hitSku").textContent = item.sku;
-  $("hitMeta").textContent = sourceLabel(item.source) + " · " + colorLabel(item.color) + " · On hand " + totalQty(item);
+  $("hitMeta").textContent = sourceLabel(item.source) + " · " + colorLabel(item.color) + " · On hand " + totalQty(item) + " · Updated " + formatUpdated(item.updatedAt);
   if ($("hitColorField")) $("hitColorField").style.display = usesColorCounts(item) ? "" : "none";
   $("hitBg").classList.add("open");
 }
@@ -841,6 +866,7 @@ function applyDelta(sign) {
   } else {
     item.qty = Math.max(0, Number(item.qty || 0) + n);
   }
+  stamp(item);
   save(); render(); openHit(item);
 }
 $("hitIn").onclick = () => applyDelta(1);
